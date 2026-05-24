@@ -1,0 +1,92 @@
+server:
+  port: 0
+
+spring:
+  application:
+    name: employee-service-test
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+    defer-datasource-initialization: true
+
+eureka:
+  client:
+    enabled: false
+
+department:
+  service:
+    url: http://test-department-service
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      department-service:
+        # Small window so tests can open the CB quickly
+        sliding-window-size: 4
+        minimum-number-of-calls: 3
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 1s
+        permitted-number-of-calls-in-half-open-state: 2
+        automatic-transition-from-open-to-half-open-enabled: true
+        register-health-indicator: true
+        record-exceptions:
+          - org.springframework.web.client.ResourceAccessException
+          - org.springframework.web.client.HttpServerErrorException
+          - java.io.IOException
+          - java.util.concurrent.TimeoutException
+        ignore-exceptions:
+          - org.modmed.employee.exception.EmployeeNotFoundException
+
+  retry:
+    instances:
+      department-service:
+        max-attempts: 2          # 1 original + 1 retry — keeps tests fast
+        wait-duration: 10ms      # no real sleeping in unit tests
+        enable-exponential-backoff: false
+        retry-exceptions:
+          - org.springframework.web.client.ResourceAccessException
+          - java.io.IOException
+        ignore-exceptions:
+          - io.github.resilience4j.circuitbreaker.CallNotPermittedException
+          - io.github.resilience4j.bulkhead.BulkheadFullException
+          - io.github.resilience4j.ratelimiter.RequestNotPermitted
+
+  ratelimiter:
+    instances:
+      department-service:
+        # Very high limit so rate-limiter does NOT interfere with other tests.
+        # The dedicated rate-limiter test exercises the fallback method directly.
+        limit-for-period: 1000
+        limit-refresh-period: 1s
+        timeout-duration: 0ms
+
+  bulkhead:
+    instances:
+      department-service:
+        # High enough for sequential tests; bulkhead fallback tested directly.
+        max-concurrent-calls: 20
+        max-wait-duration: 0ms
+
+  timelimiter:
+    instances:
+      department-service:
+        timeout-duration: 2s
+        cancel-running-future: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,circuitbreakers
+
+rest:
+  client:
+    connect-timeout-ms: 1000
+    read-timeout-ms: 2000
