@@ -31,148 +31,45 @@ department:
   service:
     url: http://department-service
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  Resilience4j Configuration
-#
-#  AOP execution order (outermost → innermost):
-#    Retry → CircuitBreaker → RateLimiter → Bulkhead → TimeLimiter → HTTP call
-#
-#  Design rule: Retry has the fallbackMethod (last resort).
-#  CB/RateLimiter/Bulkhead propagate their exceptions UP so Retry fires first,
-#  except BH/RL exceptions are in ignoreExceptions so Retry calls fallback
-#  immediately (no point retrying a saturated resource).
-# ─────────────────────────────────────────────────────────────────────────────
 resilience4j:
 
-  # ── Circuit Breaker ───────────────────────────────────────────────────────
-  # Protects downstream services from cascading failures.
-  #
-  # State machine:
-  #   CLOSED  → normal operation; failures accumulate in a sliding window
-  #   OPEN    → fast-fail; all calls rejected for wait-duration-in-open-state
-  #   HALF_OPEN → lets a small probe traffic through; transitions back to
-  #               CLOSED (if probe succeeds) or OPEN (if probe fails)
+  # Opens after 50% of last 10 calls fail; recovers after 30s
   circuitbreaker:
-    configs:
-      default:
-        register-health-indicator: true           # visible in /actuator/health
-        sliding-window-type: COUNT_BASED          # alternative: TIME_BASED
-        sliding-window-size: 10                   # last 10 calls evaluated
-        minimum-number-of-calls: 5                # min calls before CB can open
-        permitted-number-of-calls-in-half-open-state: 3
-        wait-duration-in-open-state: 30s          # stay OPEN for 30 s
-        failure-rate-threshold: 50                # open when ≥50 % calls fail
-        slow-call-rate-threshold: 80              # also open when ≥80 % are slow
-        slow-call-duration-threshold: 3s          # "slow" = >3 s
-        automatic-transition-from-open-to-half-open-enabled: true
-        # Exceptions that are recorded as failures:
-        record-exceptions:
-          - org.springframework.web.client.ResourceAccessException
-          - org.springframework.web.client.HttpServerErrorException
-          - java.io.IOException
-          - java.util.concurrent.TimeoutException
-        # Exceptions that are NOT recorded (do not affect failure rate):
-        ignore-exceptions:
-          - org.modmed.employee.exception.EmployeeNotFoundException
     instances:
       department-service:
-        base-config: default
-
-  # ── Retry ─────────────────────────────────────────────────────────────────
-  # Re-attempts a failed call with exponential back-off.
-  # Should only retry on TRANSIENT failures (network blip, temp 503).
-  # Never retry on: CB open, BH full, RL exceeded — those are structural.
-  retry:
-    configs:
-      default:
-        max-attempts: 3                           # 1 initial + 2 retries
-        wait-duration: 500ms                      # base wait between retries
-        enable-exponential-backoff: true
-        exponential-backoff-multiplier: 2         # 500ms → 1s → 2s
-        exponential-max-wait-duration: 5s         # cap at 5 s
-        retry-exceptions:
-          - org.springframework.web.client.ResourceAccessException
-          - org.springframework.web.client.HttpServerErrorException
-          - java.io.IOException
-          - java.net.ConnectException
-          - java.util.concurrent.TimeoutException
-        # Do NOT retry structural rejections — just fail fast to fallback
-        ignore-exceptions:
-          - io.github.resilience4j.circuitbreaker.CallNotPermittedException
-          - io.github.resilience4j.bulkhead.BulkheadFullException
-          - io.github.resilience4j.ratelimiter.RequestNotPermitted
-          - org.modmed.employee.exception.EmployeeNotFoundException
-    instances:
-      department-service:
-        base-config: default
-        max-attempts: 3
-
-  # ── Rate Limiter ──────────────────────────────────────────────────────────
-  # Caps outbound request rate to protect downstream from overload.
-  # Uses a token-bucket / sliding-window approach.
-  ratelimiter:
-    configs:
-      default:
-        limit-for-period: 20                      # 20 permits per refresh period
-        limit-refresh-period: 1s                  # window resets every 1 s
-        timeout-duration: 0ms                     # fail immediately if no permit
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
         register-health-indicator: true
+
+  # 3 attempts with 500ms wait between each
+  retry:
     instances:
       department-service:
-        base-config: default
+        max-attempts: 3
+        wait-duration: 500ms
+
+  # Max 20 requests per second
+  ratelimiter:
+    instances:
+      department-service:
         limit-for-period: 20
         limit-refresh-period: 1s
         timeout-duration: 0ms
 
-  # ── Bulkhead (Semaphore) ───────────────────────────────────────────────────
-  # Limits CONCURRENT calls to isolate the department-service thread pool
-  # from saturating the employee-service thread pool.
+  # Max 10 concurrent calls at a time
   bulkhead:
-    configs:
-      default:
-        max-concurrent-calls: 10                  # max parallel in-flight calls
-        max-wait-duration: 10ms                   # wait up to 10 ms for a slot
     instances:
       department-service:
-        base-config: default
         max-concurrent-calls: 10
         max-wait-duration: 10ms
 
-  # ── Time Limiter ─────────────────────────────────────────────────────────
-  # Enforces a wall-clock timeout on async (CompletableFuture) calls.
-  # Only applies when method returns CompletableFuture<T>.
-  timelimiter:
-    configs:
-      default:
-        timeout-duration: 3s
-        cancel-running-future: true
-    instances:
-      department-service:
-        timeout-duration: 2s
-        cancel-running-future: true
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  Actuator — expose all resilience4j-related endpoints
-# ─────────────────────────────────────────────────────────────────────────────
 management:
   endpoints:
     web:
       exposure:
-        include: >
-          health,info,metrics,prometheus,
-          circuitbreakers,circuitbreakerevents,
-          retries,retryevents,
-          ratelimiters,ratelimiterevents,
-          bulkheads,bulkheadevents
+        include: health, circuitbreakers, retries, ratelimiters, bulkheads
   endpoint:
     health:
       show-details: always
-      show-components: always
-  health:
-    circuitbreakers:
-      enabled: true
-    ratelimiters:
-      enabled: true
-  metrics:
-    tags:
-      application: ${spring.application.name}

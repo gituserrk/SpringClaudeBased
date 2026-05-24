@@ -183,7 +183,7 @@ class DepartmentClientTest {
         RateLimiter tightLimiter = RateLimiter.of("tight",
                 RateLimiterConfig.ofDefaults());
 
-        DepartmentDto result = departmentClient.fetchDepartmentRateLimitedFallback(
+        DepartmentDto result = departmentClient.rateLimitFallback(
                 1L, RequestNotPermitted.createRequestNotPermitted(tightLimiter));
 
         assertThat(result).isNotNull();
@@ -202,7 +202,7 @@ class DepartmentClientTest {
         io.github.resilience4j.bulkhead.Bulkhead fullBulkhead =
                 bulkheadRegistry.bulkhead(SERVICE_NAME);
 
-        DepartmentDto result = departmentClient.fetchDepartmentBulkheadFallback(
+        DepartmentDto result = departmentClient.bulkheadFallback(
                 2L, BulkheadFullException.createBulkheadFullException(fullBulkhead));
 
         assertThat(result).isNotNull();
@@ -210,37 +210,4 @@ class DepartmentClientTest {
         assertThat(result.getDepartmentName()).contains("temporarily unavailable");
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // 7. Async / TimeLimiter — fallback on slow downstream
-    // ─────────────────────────────────────────────────────────────────────────
-
-    @Test
-    @Order(8)
-    @DisplayName("Async fetch should succeed when downstream responds within timeout")
-    void asyncFetchShouldReturnDepartmentOnSuccess() throws Exception {
-        DepartmentDto expected = DepartmentDto.builder()
-                .id(5L).departmentName("Legal").departmentCode("LEG").build();
-        when(restTemplate.getForObject(anyString(), eq(DepartmentDto.class))).thenReturn(expected);
-
-        DepartmentDto result = departmentClient.fetchDepartmentAsync(5L).get();
-
-        assertThat(result.getDepartmentCode()).isEqualTo("LEG");
-    }
-
-    @Test
-    @Order(9)
-    @DisplayName("Async fetch should return fallback when downstream exceeds the TimeLimiter timeout")
-    void asyncFetchShouldReturnFallbackOnTimeout() throws Exception {
-        when(restTemplate.getForObject(anyString(), eq(DepartmentDto.class)))
-                .thenAnswer(inv -> {
-                    // Simulate a response slower than timeout-duration=2s
-                    Thread.sleep(3500);
-                    return DepartmentDto.builder().id(1L).departmentCode("SLOW").build();
-                });
-
-        DepartmentDto result = departmentClient.fetchDepartmentAsync(1L).get();
-
-        assertThat(result.getDepartmentCode()).isEqualTo("N/A");
-        assertThat(result.getDepartmentName()).contains("temporarily unavailable");
-    }
 }
