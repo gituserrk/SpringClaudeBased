@@ -1,0 +1,50 @@
+services:
+
+  service-registry:
+    build:
+      context: .
+      dockerfile: service-registry/Dockerfile
+    ports:
+      - "8761:8761"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8761/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  department-service:
+    build:
+      context: .
+      dockerfile: department-service/Dockerfile
+    ports:
+      - "8081:8081"
+    depends_on:
+      service-registry:
+        condition: service_healthy
+    environment:
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://service-registry:8761/eureka/
+
+  employee-service:
+    build:
+      context: .
+      dockerfile: employee-service/Dockerfile
+    ports:
+      - "8082:8082"
+    depends_on:
+      service-registry:
+        condition: service_healthy
+    environment:
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://service-registry:8761/eureka/
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: api-gateway/Dockerfile
+    ports:
+      - "9090:9090"
+    depends_on:
+      service-registry:
+        condition: service_healthy
+    environment:
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://service-registry:8761/eureka/
