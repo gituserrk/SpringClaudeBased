@@ -16,7 +16,12 @@ import org.springframework.web.client.RestTemplate;
  * HTTP client for Department Service.
  *
  * Resilience4j AOP order (outermost → innermost):
- *   Retry → CircuitBreaker → RateLimiter → Bulkhead → HTTP call
+ *   CircuitBreaker → Retry → RateLimiter → Bulkhead → HTTP call
+ *
+ * The fallback must be on @CircuitBreaker (not @Retry) so that failures from
+ * exhausted retries propagate up to the CB and are recorded as failures.
+ * If @Retry had the fallback, it would return a successful response to the CB,
+ * which would record it as a success — and the CB would never open.
  */
 @Slf4j
 @Component
@@ -33,8 +38,8 @@ public class DepartmentClient {
 
     // ── Main method — full resilience stack ──────────────────────────────────
 
-    @Retry(name = "department-service", fallbackMethod = "retryFallback")
-    @CircuitBreaker(name = "department-service")
+    @CircuitBreaker(name = "department-service", fallbackMethod = "circuitBreakerFallback")
+    @Retry(name = "department-service")
     @RateLimiter(name = "department-service", fallbackMethod = "rateLimitFallback")
     @Bulkhead(name = "department-service", fallbackMethod = "bulkheadFallback")
     public DepartmentDto fetchDepartment(Long departmentId) {
@@ -45,9 +50,9 @@ public class DepartmentClient {
 
     // ── Fallbacks ─────────────────────────────────────────────────────────────
 
-    // Called when all retries are exhausted (network error, 5xx, CB open)
-    public DepartmentDto retryFallback(Long departmentId, Exception ex) {
-        log.warn("Department service unavailable for id={}: {}", departmentId, ex.getMessage());
+    // Called when CB is OPEN or all retries are exhausted (exception reaches CB)
+    public DepartmentDto circuitBreakerFallback(Long departmentId, Exception ex) {
+        log.warn("Circuit breaker fallback for department id={}: {}", departmentId, ex.getMessage());
         return unavailableDepartment(departmentId);
     }
 
