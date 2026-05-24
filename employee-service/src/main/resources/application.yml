@@ -38,14 +38,14 @@ department:
 
 resilience4j:
 
-  # Opens after 50% of last 10 calls fail; recovers after 30s
+  # Opens after 50% of last 4 calls fail; recovers after 30s
   circuitbreaker:
     instances:
       department-service:
-        sliding-window-size: 10
-        minimum-number-of-calls: 5
+        sliding-window-size: 4          # evaluate last 4 calls (was 10)
+        minimum-number-of-calls: 2      # need only 2 calls before evaluating (was 5)
         failure-rate-threshold: 50
-        wait-duration-in-open-state: 30s
+        wait-duration-in-open-state: 10s         # wait 10s before going HALF-OPEN (was 30s)
         register-health-indicator: true
 
   # 3 attempts with 500ms wait between each
