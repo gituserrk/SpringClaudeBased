@@ -1,0 +1,28 @@
+server:
+  port: 9090
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      server:
+        webmvc:
+          routes:
+          - id: department-service
+            uri: lb://department-service
+            predicates:
+              - Path=/departments/**
+          - id: employee-service
+            uri: lb://employee-service
+            predicates:
+              - Path=/employees/**
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+
+logging:
+  level:
+    org.springframework.cloud.gateway: DEBUG
