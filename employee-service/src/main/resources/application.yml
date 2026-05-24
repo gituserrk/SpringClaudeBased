@@ -19,11 +19,16 @@ spring:
       ddl-auto: create-drop
     show-sql: true
     defer-datasource-initialization: true
+  cloud:
+    loadbalancer:
+      cache:
+        ttl: 5s                           # default 35s → expire instance cache after 5s
 
 eureka:
   client:
     service-url:
       defaultZone: http://localhost:8761/eureka/
+    registry-fetch-interval-seconds: 5   # default 30s → refresh registry every 5s
   instance:
     prefer-ip-address: true
 
