@@ -1,10 +1,11 @@
 package org.modmed.employee.controller;
 
+import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.modmed.employee.dto.ApiResponseDto;
 import org.modmed.employee.dto.EmployeeDto;
 import org.modmed.employee.service.EmployeeService;
-import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -30,6 +31,7 @@ public class EmployeeController {
     }
 
     @GetMapping("/{id}")
+    @RateLimiter(name = "department-service")
     public ResponseEntity<ApiResponseDto> getEmployeeById(@PathVariable Long id) {
         ApiResponseDto response = employeeService.getEmployeeById(id);
         return ResponseEntity.ok(response);

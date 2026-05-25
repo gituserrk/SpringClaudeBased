@@ -1,6 +1,7 @@
 package org.modmed.employee.config;
 
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import io.github.resilience4j.ratelimiter.RateLimiterRegistry;
 import io.github.resilience4j.retry.RetryRegistry;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
@@ -12,11 +13,14 @@ public class Resilience4jLoggingConfig {
 
     private final RetryRegistry retryRegistry;
     private final CircuitBreakerRegistry circuitBreakerRegistry;
+    private final RateLimiterRegistry rateLimiterRegistry;
 
     public Resilience4jLoggingConfig(RetryRegistry retryRegistry,
-                                     CircuitBreakerRegistry circuitBreakerRegistry) {
+                                     CircuitBreakerRegistry circuitBreakerRegistry,
+                                     RateLimiterRegistry rateLimiterRegistry) {
         this.retryRegistry = retryRegistry;
         this.circuitBreakerRegistry = circuitBreakerRegistry;
+        this.rateLimiterRegistry = rateLimiterRegistry;
     }
 
     @PostConstruct
@@ -45,5 +49,12 @@ public class Resilience4jLoggingConfig {
                         e.getStateTransition().getToState()))
                 .onCallNotPermitted(e -> log.warn("Circuit breaker '{}' is OPEN — call rejected",
                         e.getCircuitBreakerName()));
+
+        // ── Rate limiter events ───────────────────────────────────────────────────
+        rateLimiterRegistry.rateLimiter("department-service").getEventPublisher()
+                .onFailure(e -> log.warn("Rate limit exceeded for '{}' — request rejected (limit: {}/s)",
+                        e.getRateLimiterName(),
+                        rateLimiterRegistry.rateLimiter("department-service")
+                                .getRateLimiterConfig().getLimitForPeriod()));
     }
 }

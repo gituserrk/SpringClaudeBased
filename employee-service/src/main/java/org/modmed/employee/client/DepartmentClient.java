@@ -3,8 +3,6 @@ package org.modmed.employee.client;
 import io.github.resilience4j.bulkhead.BulkheadFullException;
 import io.github.resilience4j.bulkhead.annotation.Bulkhead;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
-import io.github.resilience4j.ratelimiter.RequestNotPermitted;
-import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 import io.github.resilience4j.retry.Retry;
 import io.github.resilience4j.retry.RetryRegistry;
 import lombok.extern.slf4j.Slf4j;
@@ -17,7 +15,12 @@ import org.springframework.web.client.RestTemplate;
  * HTTP client for Department Service.
  *
  * Resilience4j AOP order (outermost → innermost):
- *   CircuitBreaker → RateLimiter → Bulkhead → HTTP call (with programmatic Retry inside)
+ *   CircuitBreaker → Bulkhead → HTTP call (with programmatic Retry inside)
+ *
+ * RateLimiter is on the controller (EmployeeController) so that RequestNotPermitted
+ * propagates to GlobalExceptionHandler and returns HTTP 429. Keeping it here would
+ * swallow the exception in rateLimitFallback and return HTTP 200, making it invisible
+ * to JMeter and API clients.
  *
  * Retry is applied programmatically inside fetchDepartment rather than via @Retry
  * annotation. In Resilience4j 2.x Spring Boot, @Retry without a fallbackMethod uses
@@ -44,7 +47,6 @@ public class DepartmentClient {
     // ── Main method — full resilience stack ──────────────────────────────────
 
     @CircuitBreaker(name = "department-service", fallbackMethod = "circuitBreakerFallback")
-    @RateLimiter(name = "department-service", fallbackMethod = "rateLimitFallback")
     @Bulkhead(name = "department-service", fallbackMethod = "bulkheadFallback")
     public DepartmentDto fetchDepartment(Long departmentId) {
         String url = departmentServiceUrl + "/departments/" + departmentId;
@@ -66,12 +68,6 @@ public class DepartmentClient {
     // Called when CB is OPEN or all retries are exhausted (exception reaches CB)
     public DepartmentDto circuitBreakerFallback(Long departmentId, Exception ex) {
         log.warn("Circuit breaker fallback for department id={}: {}", departmentId, ex.getMessage());
-        return unavailableDepartment(departmentId);
-    }
-
-    // Called when too many requests per second
-    public DepartmentDto rateLimitFallback(Long departmentId, RequestNotPermitted ex) {
-        log.warn("Rate limit exceeded for department id={}: {}", departmentId, ex.getMessage());
         return unavailableDepartment(departmentId);
     }
 

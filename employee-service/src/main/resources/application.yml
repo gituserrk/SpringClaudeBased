@@ -55,11 +55,11 @@ resilience4j:
         max-attempts: 3
         wait-duration: 500ms
 
-  # Max 20 requests per second
+  # Max 5 requests per second — low enough to trigger easily in JMeter
   ratelimiter:
     instances:
       department-service:
-        limit-for-period: 20
+        limit-for-period: 5
         limit-refresh-period: 1s
         timeout-duration: 0ms
 
