@@ -5,7 +5,8 @@ import io.github.resilience4j.bulkhead.annotation.Bulkhead;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.ratelimiter.RequestNotPermitted;
 import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
-import io.github.resilience4j.retry.annotation.Retry;
+import io.github.resilience4j.retry.Retry;
+import io.github.resilience4j.retry.RetryRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.modmed.employee.dto.DepartmentDto;
 import org.springframework.beans.factory.annotation.Value;
@@ -16,36 +17,48 @@ import org.springframework.web.client.RestTemplate;
  * HTTP client for Department Service.
  *
  * Resilience4j AOP order (outermost → innermost):
- *   CircuitBreaker → Retry → RateLimiter → Bulkhead → HTTP call
+ *   CircuitBreaker → RateLimiter → Bulkhead → HTTP call (with programmatic Retry inside)
  *
- * The fallback must be on @CircuitBreaker (not @Retry) so that failures from
- * exhausted retries propagate up to the CB and are recorded as failures.
- * If @Retry had the fallback, it would return a successful response to the CB,
- * which would record it as a success — and the CB would never open.
+ * Retry is applied programmatically inside fetchDepartment rather than via @Retry
+ * annotation. In Resilience4j 2.x Spring Boot, @Retry without a fallbackMethod uses
+ * retry.executeCheckedSupplier() in a code path that does not trigger retries when
+ * stacked with other annotated aspects. Programmatic retry is reliable and keeps the
+ * retry event listeners working correctly.
  */
 @Slf4j
 @Component
 public class DepartmentClient {
 
     private final RestTemplate restTemplate;
+    private final RetryRegistry retryRegistry;
     private final String departmentServiceUrl;
 
     public DepartmentClient(RestTemplate restTemplate,
+                            RetryRegistry retryRegistry,
                             @Value("${department.service.url}") String departmentServiceUrl) {
         this.restTemplate = restTemplate;
+        this.retryRegistry = retryRegistry;
         this.departmentServiceUrl = departmentServiceUrl;
     }
 
     // ── Main method — full resilience stack ──────────────────────────────────
 
     @CircuitBreaker(name = "department-service", fallbackMethod = "circuitBreakerFallback")
-    @Retry(name = "department-service")
     @RateLimiter(name = "department-service", fallbackMethod = "rateLimitFallback")
     @Bulkhead(name = "department-service", fallbackMethod = "bulkheadFallback")
     public DepartmentDto fetchDepartment(Long departmentId) {
         String url = departmentServiceUrl + "/departments/" + departmentId;
-        log.info("Fetching department id={}", departmentId);
-        return restTemplate.getForObject(url, DepartmentDto.class);
+        Retry retry = retryRegistry.retry("department-service");
+        try {
+            return retry.executeCheckedSupplier(() -> {
+                log.info("Fetching department id={}", departmentId);
+                return restTemplate.getForObject(url, DepartmentDto.class);
+            });
+        } catch (Throwable t) {
+            // Re-throw as unchecked so @CircuitBreaker records the failure
+            if (t instanceof RuntimeException re) throw re;
+            throw new RuntimeException(t);
+        }
     }
 
     // ── Fallbacks ─────────────────────────────────────────────────────────────
